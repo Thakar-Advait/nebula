@@ -16,6 +16,7 @@ import (
 
 	"github.com/gaissmai/bart"
 	"github.com/sirupsen/logrus"
+	commandservice "github.com/slackhq/nebula/cmd/command-service"
 	"github.com/slackhq/nebula/config"
 	"github.com/slackhq/nebula/routing"
 	"github.com/slackhq/nebula/util"
@@ -32,6 +33,9 @@ type tun struct {
 	routeTree   atomic.Pointer[bart.Table[routing.Gateways]]
 	linkAddr    *netroute.LinkAddr
 	l           *logrus.Logger
+
+	// [DNS] added a DNS nameserver config here for the tunnel
+	Nameserver string
 
 	// cache out buffer since we need to prepend 4 bytes for tun metadata
 	out []byte
@@ -124,12 +128,15 @@ func newTun(c *config.C, l *logrus.Logger, vpnNetworks []netip.Prefix, _ bool) (
 		return nil, fmt.Errorf("SetNonblock: %v", err)
 	}
 
+	nameserver := c.GetString("tun.nameserver", "8.8.8.8")
+
 	t := &tun{
 		ReadWriteCloser: os.NewFile(uintptr(fd), ""),
 		Device:          name,
 		vpnNetworks:     vpnNetworks,
 		DefaultMTU:      c.GetInt("tun.mtu", DefaultMTU),
 		l:               l,
+		Nameserver:      nameserver,
 	}
 
 	err = t.reload(c, true)
@@ -220,6 +227,14 @@ func (t *tun) Activate() error {
 	if err = ioctl(fd, unix.SIOCSIFFLAGS, uintptr(unsafe.Pointer(&ifrf))); err != nil {
 		return fmt.Errorf("failed to run tun device: %s", err)
 	}
+
+	// [DNS] added the modify DNS nameserver logic here
+	err = t.modifyDns()
+	if err != nil {
+		t.l.Infof("DNS modification failed for tunnel %s", t.Device)
+		return err
+	}
+	t.l.Infof("DNS modification successful for tunnel %s", t.Device)
 
 	// Unsafe path routes
 	return t.addRoutes(false)
@@ -563,4 +578,41 @@ func prefixToMask(prefix netip.Prefix) netip.Addr {
 
 	addr, _ := netip.AddrFromSlice(net.CIDRMask(prefix.Bits(), pLen))
 	return addr
+}
+
+func (t *tun) RevertDns() error {
+	// [DNS] added revert the DNS nameserver logic here
+	err := t.revertDns()
+	if err != nil {
+		t.l.Errorf("Failed to reset DNS: %v", err)
+		return err
+	}
+	t.l.Infof("DNS reset successful for tunnel %s", t.Device)
+
+	return nil
+}
+
+// [DNS] modifyDns() modifies the DNS nameserver associated with the tunnel interface
+func (t *tun) modifyDns() error {
+	interfaceAlias := t.Device
+	nameserver := t.Nameserver
+
+	err := commandservice.SetDns(interfaceAlias, nameserver)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// [DNS] revertDns() reverts the DNS nameserver associated with the tunnel interface
+func (t *tun) revertDns() error {
+	interfaceAlias := t.Device
+
+	err := commandservice.ResetDns(interfaceAlias)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

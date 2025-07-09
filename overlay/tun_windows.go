@@ -17,6 +17,7 @@ import (
 
 	"github.com/gaissmai/bart"
 	"github.com/sirupsen/logrus"
+	commandservice "github.com/slackhq/nebula/cmd/command-service"
 	"github.com/slackhq/nebula/config"
 	"github.com/slackhq/nebula/routing"
 	"github.com/slackhq/nebula/util"
@@ -35,6 +36,9 @@ type winTun struct {
 	routeTree   atomic.Pointer[bart.Table[routing.Gateways]]
 	l           *logrus.Logger
 
+	// [DNS] added a DNS nameserver config here for the tunnel
+	Nameserver string
+
 	tun *wintun.NativeTun
 }
 
@@ -49,6 +53,8 @@ func newTun(c *config.C, l *logrus.Logger, vpnNetworks []netip.Prefix, _ bool) (
 	}
 
 	deviceName := c.GetString("tun.dev", "")
+	// fetch the nameserver from config file. If not specified, default to 8.8.8.8
+	nameserver := c.GetString("tun.nameserver", "8.8.8.8")
 	guid, err := generateGUIDByDeviceName(deviceName)
 	if err != nil {
 		return nil, fmt.Errorf("generate GUID failed: %w", err)
@@ -59,6 +65,8 @@ func newTun(c *config.C, l *logrus.Logger, vpnNetworks []netip.Prefix, _ bool) (
 		vpnNetworks: vpnNetworks,
 		MTU:         c.GetInt("tun.mtu", DefaultMTU),
 		l:           l,
+		// [DNS] added a DNS nameserver config here for the tunnel
+		Nameserver: nameserver,
 	}
 
 	err = t.reload(c, true)
@@ -133,6 +141,14 @@ func (t *winTun) Activate() error {
 	if err != nil {
 		return fmt.Errorf("failed to set address: %w", err)
 	}
+
+	// [DNS] added modifyDNS() logic here
+	err = t.modifyDns()
+	if err != nil {
+		t.l.Infof("DNS modification failed for tunnel %s", t.Device)
+		return err
+	}
+	t.l.Infof("DNS modification successful for tunnel %s", t.Device)
 
 	err = t.addRoutes(false)
 	if err != nil {
@@ -288,4 +304,41 @@ func checkWinTunExists() error {
 
 	_, err = syscall.LoadDLL(filepath.Join(filepath.Dir(myPath), "dist", "windows", "wintun", "bin", arch, "wintun.dll"))
 	return err
+}
+
+func (t *winTun) RevertDns() error {
+	// [DNS] added revertDNS() logic here
+	err := t.revertDns()
+	if err != nil {
+		t.l.Errorf("Failed to reset DNS: %v", err)
+		return err
+	}
+	t.l.Infof("DNS reset successful for tunnel %s", t.Device)
+
+	return nil
+}
+
+// [DNS] modifyDns() modifies the DNS nameserver associated with the tunnel interface
+func (t *winTun) modifyDns() error {
+	interfaceAlias := t.Device
+	nameserver := t.Nameserver
+
+	err := commandservice.SetDns(interfaceAlias, nameserver)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// [DNS] revertDns() reverts the DNS nameserver associated with the tunnel interface
+func (t *winTun) revertDns() error {
+	interfaceAlias := t.Device
+
+	err := commandservice.ResetDns(interfaceAlias)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

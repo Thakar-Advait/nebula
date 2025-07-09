@@ -41,3 +41,8 @@ func (NoopTun) NewMultiQueueReader() (io.ReadWriteCloser, error) {
 func (NoopTun) Close() error {
 	return nil
 }
+
+// [DNS] Implement RevertDns() error method 
+func (NoopTun) RevertDns() error {
+	panic("not implemented")
+}

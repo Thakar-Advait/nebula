@@ -16,6 +16,7 @@ import (
 
 	"github.com/gaissmai/bart"
 	"github.com/sirupsen/logrus"
+	commandservice "github.com/slackhq/nebula/cmd/command-service"
 	"github.com/slackhq/nebula/config"
 	"github.com/slackhq/nebula/routing"
 	"github.com/slackhq/nebula/util"
@@ -39,6 +40,9 @@ type tun struct {
 	routeChan                 chan struct{}
 	useSystemRoutes           bool
 	useSystemRoutesBufferSize int
+
+	// [DNS] added DNS nameserver
+	Nameserver string
 
 	l *logrus.Logger
 }
@@ -112,6 +116,8 @@ func newTun(c *config.C, l *logrus.Logger, vpnNetworks []netip.Prefix, multiqueu
 	}
 	name := strings.Trim(string(req.Name[:]), "\x00")
 
+	nameserver := c.GetString("tun.nameserver", "8.8.8.8")
+
 	file := os.NewFile(uintptr(fd), "/dev/net/tun")
 	t, err := newTunGeneric(c, l, file, vpnNetworks)
 	if err != nil {
@@ -119,6 +125,7 @@ func newTun(c *config.C, l *logrus.Logger, vpnNetworks []netip.Prefix, multiqueu
 	}
 
 	t.Device = name
+	t.Nameserver = nameserver
 
 	return t, nil
 }
@@ -671,6 +678,43 @@ func (t *tun) Close() error {
 
 	if t.ioctlFd > 0 {
 		_ = os.NewFile(t.ioctlFd, "ioctlFd").Close()
+	}
+
+	return nil
+}
+
+func (t *tun) RevertDns() error {
+	// [DNS] added revert the DNS nameserver logic here
+	err := t.revertDns()
+	if err != nil {
+		t.l.Errorf("Failed to reset DNS: %v", err)
+		return err
+	}
+	t.l.Infof("DNS reset successful for tunnel %s", t.Device)
+
+	return nil
+}
+
+// [DNS] modifyDns() modifies the DNS nameserver associated with the tunnel interface
+func (t *tun) modifyDns() error {
+	interfaceAlias := t.Device
+	nameserver := t.Nameserver
+
+	err := commandservice.SetDns(interfaceAlias, nameserver)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// [DNS] revertDns() reverts the DNS nameserver associated with the tunnel interface
+func (t *tun) revertDns() error {
+	interfaceAlias := t.Device
+
+	err := commandservice.ResetDns(interfaceAlias)
+	if err != nil {
+		return err
 	}
 
 	return nil

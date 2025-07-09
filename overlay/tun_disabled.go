@@ -131,3 +131,7 @@ func (p prettyPacket) String() string {
 
 	return s.String()
 }
+
+func (*disabledTun) RevertDns() error {
+	return nil
+}
