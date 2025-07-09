@@ -85,6 +85,10 @@ func (c *Control) Stop() {
 	// being created while we're shutting them all down.
 	c.cancel()
 
+	// [DNS] Revert DNS
+	c.l.Info("[DNS] Reverting DNS...")
+	c.f.revertDns()
+
 	c.CloseAllTunnels(false)
 	if err := c.f.Close(); err != nil {
 		c.l.WithError(err).Error("Close interface failed")

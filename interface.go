@@ -461,3 +461,12 @@ func (f *Interface) Close() error {
 	// Release the tun device
 	return f.inside.Close()
 }
+
+func (f *Interface) revertDns() {
+	err := f.inside.RevertDns()
+	if err != nil {
+		f.l.Error("Failed to revert dns")
+	}
+	f.l.Info("DNS reverted successfully")
+	// panic("not implemented")
+}

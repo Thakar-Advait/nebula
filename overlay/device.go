@@ -10,6 +10,8 @@ import (
 type Device interface {
 	io.ReadWriteCloser
 	Activate() error
+	// [DNS] Add RevertDns() error method
+	RevertDns() error
 	Networks() []netip.Prefix
 	Name() string
 	RoutesFor(netip.Addr) routing.Gateways

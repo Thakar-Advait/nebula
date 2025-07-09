@@ -65,3 +65,7 @@ func (d *UserDevice) Close() error {
 	d.outboundWriter.Close()
 	return nil
 }
+
+func (d *UserDevice) RevertDns() error {
+	panic("not implemented")
+}
